@@ -1,0 +1,56 @@
+devenv - opens up Visual Studio 
+
+----------------------------------------------
+
+subst [drive:] [path] - creates a fake drive associated with the defined path
+
+subst \? - for additional information about the subst command
+
+IMPORTANT NOTE: After the subst it is good practice to restart windows or log out and log back in the session to set up the k: drive properly 
+
+Note: actually \? is the help command you can use with most of the cmd commands 
+
+--------------------------------
+
+ - cl compile commands:
+
+/Zi - command used with cl file.cpp  (cl /Zi file.cpp), to generate debug info
+
+/FC - Full path of the compile error, providing the source code error line
+
+--------------------------------------
+
+
+dir \directory  - shows you the files and folders inside the directory typed after \
+
+
+------------------------------
+
+
+set - displays all of the environment variables that are set. E.g If we do set inside our virtual drive k, it will show all of the local variables to this shell in cmd  
+
+-----------------------
+
+pushd and popd commands:
+
+example: 
+
+mkdir ..\..\build
+pushd ..\..\build
+cl ..\Engine\code\win32_mocho.cpp
+popd
+
+
+Here’s what each line in your script is doing:
+
+mkdir ..\..\build: This creates a directory called build in the parent directory of the current location (two levels up from the current directory).
+
+pushd ..\..\build: This changes the current working directory to the build directory you just created (or navigates to that location). At the same time, it "pushes" the previous directory onto a stack so you can return to it later.
+
+cl ..\Engine\code\win32_mocho.cpp: This command compiles the win32_mocho.cpp file using the cl compiler. The path ..\Engine\code\win32_mocho.cpp refers to the location of your source file relative to the current directory (which is now build due to the pushd command).
+
+popd: This returns you to the original directory that was active before the pushd command, by "popping" the previously saved directory off the stack.
+
+In summary, pushd changes the directory and stores the current one, and popd returns to the original directory. This way, you can perform operations in another directory without losing your initial working directory context.
+
+-------------------------------------------------
