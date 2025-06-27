@@ -6,7 +6,7 @@ mkdir ..\..\build
 
 REM pushes the current directory to the stack and puts us in ..\..\build
 REM while we run the compiler line, so that the compiled files can be stored in the created build folder 
-
+	
 pushd ..\..\build
 
 REM compile the cpp with the linked lib to our build folder // For documentation on cl commands used read the cmdnotes.txt
