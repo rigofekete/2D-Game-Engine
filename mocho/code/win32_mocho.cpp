@@ -38,7 +38,7 @@ struct win32_onscreen_buffer
 
 //TODO: These are globals for now
 global_variable win32_onscreen_buffer GlobalBackbuffer {};
-global_variable bool GlobalRunning;
+global_variable bool32 GlobalRunning;
 global_variable LPDIRECTSOUNDBUFFER GlobalSecondaryBuffer;
 
 struct win32_window_dimension
@@ -167,6 +167,13 @@ typedef DIRECT_SOUND_CREATE(direct_sound_create);
 internal void Win32LoadXInput(void)
 { 
     HMODULE XInputLibrary = LoadLibraryA("xinput1_4.dll");
+
+    if(!XInputLibrary) 
+    {
+      //TODO: Diagnostic
+      XInputLibrary = LoadLibraryA("xinput9_1_0.dll");
+    }
+
     if(!XInputLibrary) 
     {
       //TODO: Diagnostic
@@ -312,8 +319,8 @@ Win32MainWindowCallback(HWND Window,
         case WM_KEYUP:
         {
             uint32 VKCode = WParam; 
-            bool WasDown = ((LParam & (1 << 30)) != 0);
-            bool IsDown = ((LParam & (1 << 31)) == 0);
+            bool32 WasDown = ((LParam & (1 << 30)) != 0);
+            bool32 IsDown = ((LParam & (1 << 31)) == 0);
             
             if(WasDown != IsDown)
             {
@@ -395,7 +402,7 @@ Win32MainWindowCallback(HWND Window,
         default: 
         {
             // OutputDebugStringA("default\n");
-            Result = DefWindowProc(Window, Message, WParam, LParam);
+            Result = DefWindowProcA(Window, Message, WParam, LParam);
         } break;
 
     }
@@ -408,7 +415,7 @@ struct win32_sound_output
 {
   // Sound test
   int SamplesPerSecond = 48000;
-  // hz per second
+  // hz(waves) per second
   int ToneHz = 256;
   int16 ToneVolume = 6000;
   uint32 RunningSampleIndex = 0;
@@ -416,6 +423,8 @@ struct win32_sound_output
   // size of the left-right wave pair 
   int BytesPerSample = sizeof(int16)*2;
   int SecondaryBufferSize = SamplesPerSecond*BytesPerSample;
+  real32 tSine;
+  int LatencySampleCount;
 };
 
 
@@ -444,27 +453,29 @@ void Win32FillSoundBuffer(win32_sound_output *SoundOutput, DWORD ByteToLock, DWO
 	for(DWORD SampleIndex = 0; SampleIndex < Region1SampleCount; ++SampleIndex)
 	{
 	    // TODO: Draw this in the diagram for to understand what is going on. Make some comments here if needed.
-	    real32 t = 2.0f*Pi32*(real32)SoundOutput->RunningSampleIndex / (real32)SoundOutput->WavePeriod;
-	    real32 SineValue = sinf(t);
+	    real32 SineValue = sinf(SoundOutput->tSine);
 	    int16 SampleValue = (int16)(SineValue * SoundOutput->ToneVolume);
 	    *SampleOut++ = SampleValue;
 	    *SampleOut++ = SampleValue;
 
+	    SoundOutput->tSine += 2.0f*Pi32*1.0f/(real32)SoundOutput->WavePeriod;
 	    ++SoundOutput->RunningSampleIndex;
 	}
+
 	DWORD Region2SampleCount = Region2Size/SoundOutput->BytesPerSample;
 	SampleOut = (int16 *)Region2;
 	for(DWORD SampleIndex = 0; SampleIndex < Region2SampleCount; ++SampleIndex)
 	{
-	    real32 t = 2.0f*Pi32*(real32)SoundOutput->RunningSampleIndex / (real32)SoundOutput->WavePeriod;
-	    real32 SineValue = sinf(t);
+	    real32 SineValue = sinf(SoundOutput->tSine);
 	    int16 SampleValue = (int16)(SineValue * SoundOutput->ToneVolume);
 	    *SampleOut++ = SampleValue;
 	    *SampleOut++ = SampleValue;
 
+	    SoundOutput->tSine += 2.0f*Pi32*1.0f/(real32)SoundOutput->WavePeriod;
 	    ++SoundOutput->RunningSampleIndex;
 	}
 
+	// It is very important to unlock the byte location previously locked in order to properly play the sound
 	GlobalSecondaryBuffer->Unlock(Region1, Region1Size, Region2, Region2Size);
     }
     
@@ -491,20 +502,18 @@ int CALLBACK WinMain(HINSTANCE Instance,
 
     if(RegisterClassA(&WindowClass))
     {
-        HWND Window =  
-            CreateWindowExA(
-                0,
-                WindowClass.lpszClassName,
-                "Mocho",
-                WS_OVERLAPPEDWINDOW|WS_VISIBLE,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                0,
-                0,
-                Instance, 
-                0);
+        HWND Window = CreateWindowExA(0,
+				      WindowClass.lpszClassName,
+				      "Mocho",
+				      WS_OVERLAPPEDWINDOW|WS_VISIBLE,
+				      CW_USEDEFAULT,
+				      CW_USEDEFAULT,
+				      CW_USEDEFAULT,
+				      CW_USEDEFAULT,
+				      0,
+				      0,
+				      Instance, 
+				      0);
         if(Window)
         {
             HDC DeviceContext = GetDC(Window);
@@ -528,8 +537,10 @@ int CALLBACK WinMain(HINSTANCE Instance,
 	    // size of the left-right wave pair 
 	    SoundOutput.BytesPerSample = sizeof(int16)*2;
 	    SoundOutput.SecondaryBufferSize = SoundOutput.SamplesPerSecond*SoundOutput.BytesPerSample;
+	    // set latency buffer of 1/15 of a second (around 66 ms)
+	    SoundOutput.LatencySampleCount = SoundOutput.SamplesPerSecond  / 15;
 	    Win32InitDSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.SecondaryBufferSize);
-	    Win32FillSoundBuffer(&SoundOutput, 0, SoundOutput.SecondaryBufferSize);
+	    Win32FillSoundBuffer(&SoundOutput, 0, SoundOutput.LatencySampleCount*SoundOutput.BytesPerSample);
 	    GlobalSecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
 	    
             GlobalRunning = true;
@@ -553,35 +564,45 @@ int CALLBACK WinMain(HINSTANCE Instance,
                     ControllerIndex < XUSER_MAX_COUNT; 
                     ++ControllerIndex)
                 {
-                    XINPUT_STATE ControllerState;
-                    // if return from this func is ERROR_SUCCESS....
-                    if(XInputGetState(ControllerIndex, &ControllerState) == ERROR_SUCCESS)
-                    {
-                        // .. then this controller is plugged in 
-                        // TODO: See if ControllerState.dwPacketNumber increments too rapidly
+                  XINPUT_STATE ControllerState; 
+		  if(XInputGetState(ControllerIndex, &ControllerState) == ERROR_SUCCESS)
+		  {
+		    // .. then this controller is plugged in 
+		    // TODO: See if ControllerState.dwPacketNumber increments too rapidly
 
-                        // This is a nice practice to shorten the pointer access to reach the member values we need. By snapping a pointer to XINPUT_GAMEPAD with the address of the struct it belongs to, and exact location, we can then afterwards simply use this new pointer Pad to access the wButtons for state checks
-                        XINPUT_GAMEPAD *Pad = &ControllerState.Gamepad;
-                        bool Up = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
-                        bool Down = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
-                        bool Left = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
-                        bool Right = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
-                        bool Start = (Pad->wButtons & XINPUT_GAMEPAD_START);
-                        bool Back = (Pad->wButtons & XINPUT_GAMEPAD_BACK);
-                        bool LeftShoulder = (Pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
-                        bool RighShoulder = (Pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
-                        bool AButton = (Pad->wButtons & XINPUT_GAMEPAD_A);
-                        bool BButton = (Pad->wButtons & XINPUT_GAMEPAD_B);
-                        bool XButton = (Pad->wButtons & XINPUT_GAMEPAD_X);
-                        bool YButton = (Pad->wButtons & XINPUT_GAMEPAD_Y);
+		    // This is a nice practice to shorten the pointer access to reach the member values we need.
+		    // By snapping a pointer to XINPUT_GAMEPAD with the address of the struct it belongs to, 
+		    // and exact location, we can then afterwards simply use this new pointer Pad to access the wButtons
+		    // for state checks
+		    XINPUT_GAMEPAD *Pad = &ControllerState.Gamepad;
+		    bool32 Up = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
+		    bool32 Down = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
+		    bool32 Left = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
+		    bool32 Right = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
+		    bool32 Start = (Pad->wButtons & XINPUT_GAMEPAD_START);
+		    bool32 Back = (Pad->wButtons & XINPUT_GAMEPAD_BACK);
+		    bool32 LeftShoulder = (Pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
+		    bool32 RighShoulder = (Pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+		    bool32 AButton = (Pad->wButtons & XINPUT_GAMEPAD_A);
+		    bool32 BButton = (Pad->wButtons & XINPUT_GAMEPAD_B);
+		    bool32 XButton = (Pad->wButtons & XINPUT_GAMEPAD_X);
+		    bool32 YButton = (Pad->wButtons & XINPUT_GAMEPAD_Y);
 
-                        // thumb sticks     
-                        int16 StickX = Pad->sThumbLX;
-                        int16 StickY = Pad->sThumbLY;
+		    // thumb sticks     
+		    int16 StickX = Pad->sThumbLX;
+		    int16 StickY = Pad->sThumbLY;
 
-                        // change coordinate offsets with Left Thumb Stick 
-                        // XOffset += StickX >> 12;
-                        // YOffset += StickY >> 12;
+		    // TODO: We will do deadzone handling later using:
+		    // #define XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE  7849
+		    // #define XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE 8689
+
+		    // change coordinate offsets with Left Thumb Stick 
+		    XOffset += StickX / 4096;
+		    YOffset += StickY / 4096;
+    
+    
+		    SoundOutput.ToneHz = 512 + (int)(256.0f*((real32)StickY / 30000.0f));
+		    SoundOutput.WavePeriod = SoundOutput.SamplesPerSecond/SoundOutput.ToneHz;
 
                     }
                     else
@@ -605,30 +626,36 @@ int CALLBACK WinMain(HINSTANCE Instance,
 		{
 		    DWORD ByteToLock = ((SoundOutput.RunningSampleIndex*SoundOutput.BytesPerSample) %
 					SoundOutput.SecondaryBufferSize);
+
+		    // we define this to have 1/15 of a second additional buffer to always write ahead of the play cursor and reduce 
+		    // the latency needed to process the sound since we are doing it ahead of time
+		    // Of course we need to map all of this to the actual buffer in case it wraps around the end hence the use of
+		    // tht mod operator again
+		    DWORD TargetCursor = ((PlayCursor + (SoundOutput.LatencySampleCount*SoundOutput.BytesPerSample)) %
+					  SoundOutput.SecondaryBufferSize);
 		    DWORD BytesToWrite;
 		    // TODO: Change this to using a lower latency offset from the playcursor 
 		    // when we actually start having sound effects.
-		    if(ByteToLock > PlayCursor)
+		    if(ByteToLock > TargetCursor)
 		    {
 		      BytesToWrite = (SoundOutput.SecondaryBufferSize - ByteToLock);
-		      BytesToWrite += PlayCursor;
+		      BytesToWrite += TargetCursor;
 		    }
 		    else
 		    {
-		      BytesToWrite = PlayCursor - ByteToLock;
+		      BytesToWrite = TargetCursor - ByteToLock;
 		    }
-  
+
 		    Win32FillSoundBuffer(&SoundOutput, ByteToLock, BytesToWrite);
 		}
 
-		// It is very important to unlock the byte location previously locked in order to properly play the sound
                 win32_window_dimension Dimension = Win32GetWindowDimension(Window);
                 Win32DisplayBufferInWindow(&GlobalBackbuffer, DeviceContext, 
                                            Dimension.Width, Dimension.Height);
                 
                 // Increasing this with the controller Sticks in the controller code block 
-                ++XOffset; 
-	  }
+                // ++XOffset; 
+	        }
 	}
         else
         {
@@ -643,5 +670,6 @@ int CALLBACK WinMain(HINSTANCE Instance,
 
     return (0);
 }
+
 
 

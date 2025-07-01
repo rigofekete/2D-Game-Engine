@@ -15,9 +15,8 @@ REM
 REM this line calls the vs batch in order for us to use the cl compiler in our shell 
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
 
-REM THIS SEEMS TO BE ALREADY SET TO THE WIN PATH. PROBABLY AUTOMATION FROM MS
 REM this sets the path of the vs code executable so we can open it ANYWHERE from our shell with the 'code' command 
-REM set path=C:\Users\gubbi\AppData\Local\Programs\Microsoft VS Code;%path%
+set path=C:\Users\fabri\AppData\Local\Programs\Microsoft VS Code;%path%
 
 REM sets the misc folder of our project to the system environment paths 
 set path=k:\mocho\misc;%path%
