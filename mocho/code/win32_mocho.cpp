@@ -621,7 +621,7 @@ int CALLBACK WinMain(HINSTANCE Instance,
                     }
                     else
                     {
-                        // ...the controller is not available 
+                        // ..the controller is not available 
                     }
                 }
 
