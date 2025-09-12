@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <xinput.h>
 #include <dsound.h>
 // TODO: Implement sine ourselves
@@ -142,6 +143,8 @@ global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub;
 
 #define XInputGetState XInputGetState_
 
+
+
 // Same as above but grouped for the XInputSetState dynamic function version 
 #define X_INPUT_SET_STATE(name) DWORD WINAPI name(DWORD dUserIndex, XINPUT_VIBRATION *pVibration)
 
@@ -155,6 +158,8 @@ X_INPUT_SET_STATE(XInputSetStateStub)
 global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
 
 #define XInputSetState XInputSetState_
+
+
 
 
 #define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND* ppDS, LPUNKNOWN pUnkOuter)
@@ -417,11 +422,12 @@ struct win32_sound_output
   int SamplesPerSecond = 48000;
   // hz(waves) per second
   int ToneHz = 256;
-  int16 ToneVolume = 6000;
+  int16 ToneVolume = 3000;
   uint32 RunningSampleIndex = 0;
   int WavePeriod = SamplesPerSecond/ToneHz;
   // size of the left-right wave pair 
   int BytesPerSample = sizeof(int16)*2;
+  // Convert samples per second to total bytes needed in the buffer (each sample/measure takes 4 bytes)
   int SecondaryBufferSize = SamplesPerSecond*BytesPerSample;
   real32 tSine;
   int LatencySampleCount;
@@ -434,7 +440,6 @@ void Win32FillSoundBuffer(win32_sound_output *SoundOutput, DWORD ByteToLock, DWO
     // Visual example of how the sound buffer will work 
     // int16  int16  int16 int16 ... 
     // [LEFT  RIGHT] LEFT  RIGHT LEFT RIGHT LEFT ...
-    // TODO: Switch to a sine wave
     VOID *Region1;
     DWORD Region1Size;
     VOID *Region2;
@@ -454,6 +459,7 @@ void Win32FillSoundBuffer(win32_sound_output *SoundOutput, DWORD ByteToLock, DWO
 	{
 	    // TODO: Draw this in the diagram for to understand what is going on. Make some comments here if needed.
 	    real32 SineValue = sinf(SoundOutput->tSine);
+	    // convert amplitude of the sine wave value to audio sample format
 	    int16 SampleValue = (int16)(SineValue * SoundOutput->ToneVolume);
 	    *SampleOut++ = SampleValue;
 	    *SampleOut++ = SampleValue;
@@ -500,6 +506,10 @@ int CALLBACK WinMain(HINSTANCE Instance,
     // WindowClass.hIcon;
     WindowClass.lpszClassName = "MochoWindowClass";
 
+    LARGE_INTEGER PerfCountFrequencyResult;
+    QueryPerformanceFrequency(&PerfCountFrequencyResult);
+    int64 PerfCountFrequency = PerfCountFrequencyResult.QuadPart;
+
     if(RegisterClassA(&WindowClass))
     {
         HWND Window = CreateWindowExA(0,
@@ -531,8 +541,8 @@ int CALLBACK WinMain(HINSTANCE Instance,
 	    SoundOutput.SamplesPerSecond = 48000;
 	    // hz per second
 	    SoundOutput.ToneHz = 256;
-	    SoundOutput.ToneVolume = 6000;
-	    SoundOutput.RunningSampleIndex = 0;
+	    SoundOutput.ToneVolume = 3000;
+	    // SoundOutput.RunningSampleIndex = 0;
 	    SoundOutput.WavePeriod = SoundOutput.SamplesPerSecond/SoundOutput.ToneHz;
 	    // size of the left-right wave pair 
 	    SoundOutput.BytesPerSample = sizeof(int16)*2;
@@ -542,8 +552,12 @@ int CALLBACK WinMain(HINSTANCE Instance,
 	    Win32InitDSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.SecondaryBufferSize);
 	    Win32FillSoundBuffer(&SoundOutput, 0, SoundOutput.LatencySampleCount*SoundOutput.BytesPerSample);
 	    GlobalSecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
-	    
+
             GlobalRunning = true;
+
+	    LARGE_INTEGER LastCounter;
+	    QueryPerformanceCounter(&LastCounter);
+	    uint64 LastCycleCount = __rdtsc();
             while(GlobalRunning)
             {
                 MSG Message {};
@@ -599,8 +613,8 @@ int CALLBACK WinMain(HINSTANCE Instance,
 		    // change coordinate offsets with Left Thumb Stick 
 		    XOffset += StickX / 4096;
 		    YOffset += StickY / 4096;
-    
-    
+
+
 		    SoundOutput.ToneHz = 512 + (int)(256.0f*((real32)StickY / 30000.0f));
 		    SoundOutput.WavePeriod = SoundOutput.SamplesPerSecond/SoundOutput.ToneHz;
 
@@ -655,7 +669,29 @@ int CALLBACK WinMain(HINSTANCE Instance,
                 
                 // Increasing this with the controller Sticks in the controller code block 
                 // ++XOffset; 
-	        }
+
+		uint64 EndCycleCount = __rdtsc();
+
+		LARGE_INTEGER EndCounter;
+		QueryPerformanceCounter(&EndCounter);
+
+		// TODO: Display the value here
+		uint64 CyclesElapsed = EndCycleCount - LastCycleCount;
+		int64 CounterElapsed = EndCounter.QuadPart - LastCounter.QuadPart;
+		// CounterElapsed is total number of cycles the cpu did after each frame/loop
+		// and PerfCountFrequency is the counts per second
+		real64 MSPerFrame = ((1000.0f*(real64)CounterElapsed) / (real64)PerfCountFrequency);
+		real64 FPS = (real64)PerfCountFrequency / (real64)CounterElapsed;
+		// these are getting casted to int32 just because of how the print formatted string function wsprintf historically expects int32 types for integers 
+		real64 MCPF = (real64)(CyclesElapsed / (1000.0f * 1000.0f));
+
+		char Buffer[256];
+		sprintf(Buffer, "%.02fms/f, %.02ff/s, %.02fmc/f\n", MSPerFrame, FPS, MCPF);
+		OutputDebugStringA(Buffer);
+
+		LastCounter = EndCounter;
+		LastCycleCount = EndCycleCount;
+	    }
 	}
         else
         {

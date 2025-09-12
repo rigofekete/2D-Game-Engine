@@ -11,7 +11,7 @@ pushd ..\..\build
 
 REM compile the cpp with the linked lib to our build folder // For documentation on cl commands used read the cmdnotes.txt
 
-cl /FC /Zi ..\mocho\code\win32_mocho.cpp /link user32.lib Gdi32.lib
+cl -O2 /FC /Zi ..\mocho\code\win32_mocho.cpp /link user32.lib Gdi32.lib
 
 REM pop the previous directory so we can go to the location we were before the pushd
 
