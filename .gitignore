@@ -1,3 +1,5 @@
 # Build folder 
 build/
 mocho/misc
+
+/setup-env.bat
