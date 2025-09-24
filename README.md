@@ -1,12 +1,12 @@
 # 2D Game Engine
 
-**Experimental 2D game engine built from scratch in C++ using the Win32 API**
+**Experimental 2D game engine built from scratch in C using the Win32 API**
 
 ---
 
 ## 📌 Description
 
-This project is a work-in-progress 2D game engine written in C++, inspired by the **Handmade Hero** series by Casey Muratori.  
+This project is a work-in-progress 2D game engine written in C, inspired by the **Handmade Hero** series by Casey Muratori.  
 The engine is developed from the ground up with a focus on **low-level systems programming**, **performance optimization**, and **direct control over hardware resources**.  
 
 The current implementation establishes the foundation for real-time rendering, input, audio, and timing — providing the essential building blocks for a performant custom game engine.
